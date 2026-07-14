@@ -12,34 +12,56 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install OCI CLI
-        uses: oracle-actions/setup-oci-cli@v1
+      - name: Install Python dependencies
+        run: pip install oci
 
-      - name: Configure OCI CLI
+      - name: Create instance using Python SDK
         run: |
-          mkdir -p ~/.oci
-          cat > ~/.oci/config << EOF
-          [DEFAULT]
-          user=${{ secrets.OCI_CLI_USER }}
-          fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}
-          tenancy=${{ secrets.OCI_CLI_TENANCY }}
-          region=${{ secrets.OCI_CLI_REGION }}
-          key_file=/tmp/oci_api_key.pem
-          EOF
-          echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > /tmp/oci_api_key.pem
-          chmod 600 /tmp/oci_api_key.pem
-          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
-
-      - name: Try to Create Instance
-        run: |
-          oci compute instance launch \
-            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
-            --availability-domain "${{ secrets.AD_NAME }}" \
-            --shape "VM.Standard.A1.Flex" \
-            --shape-config '{"ocpus":4,"memoryInGBs":24}' \
-            --image-id "${{ secrets.IMAGE_ID }}" \
-            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
-            --display-name "oci-arm-vm" \
-            --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            --boot-volume-size-in-gbs 200 || true
+          cat > /tmp/create_instance.py << 'PYEOF'
+          import oci
+          import os
+          
+          config = {
+              "user": os.environ["OCI_CLI_USER"],
+              "fingerprint": os.environ["OCI_CLI_FINGERPRINT"],
+              "tenancy": os.environ["OCI_CLI_TENANCY"],
+              "region": os.environ["OCI_CLI_REGION"],
+              "key_content": os.environ["OCI_CLI_KEY_CONTENT"]
+          }
+          
+          client = oci.core.ComputeClient(config)
+          
+          launch_instance_details = oci.core.LaunchInstanceDetails(
+              compartment_id=os.environ["OCI_COMPARTMENT_ID"],
+              availability_domain=os.environ["AD_NAME"],
+              display_name="oci-arm-vm",
+              shape="VM.Standard.A1.Flex",
+              shape_config=oci.core.LaunchInstanceShapeConfigDetails(
+                  ocpus=4,
+                  memory_in_gbs=24
+              ),
+              image_id=os.environ["IMAGE_ID"],
+              subnet_id=os.environ["OCI_SUBNET_ID"],
+              metadata={
+                  "ssh_authorized_keys": os.environ["SSH_PUBLIC_KEY"]
+              },
+              source_details=oci.core.InstanceSourceViaImageDetails(
+                  source_type="image",
+                  image_id=os.environ["IMAGE_ID"]
+              ),
+              boot_volume_size_in_gbs=200
+          )
+          
+          try:
+              response = client.launch_instance(launch_instance_details)
+              print(f"Instance created! OCID: {response.data.id}")
+          except Exception as e:
+              print(f"Error creating instance (may be out of capacity): {e}")
+          PYEOF
+          
+          env | grep OCI > /tmp/.env
+          env | grep SSH >> /tmp/.env
+          env | grep AD >> /tmp/.env
+          env | grep IMAGE >> /tmp/.env
+          python3 /tmp/create_instance.py || true
           exit 0
