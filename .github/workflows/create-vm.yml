@@ -24,6 +24,8 @@ jobs:
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
+          echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > /tmp/oci_key.pem
+          chmod 600 /tmp/oci_key.pem
           cat > /tmp/launch.py << 'PYEOF'
           import oci, os, sys
           from oci.core.models import LaunchInstanceDetails, LaunchInstanceShapeConfigDetails, InstanceSourceViaImageDetails
@@ -42,7 +44,7 @@ jobs:
                   'fingerprint': os.environ['OCI_CLI_FINGERPRINT'],
                   'tenancy': os.environ['OCI_CLI_TENANCY'],
                   'region': os.environ['OCI_CLI_REGION'],
-                  'key_content': os.environ['OCI_CLI_KEY_CONTENT']
+                  'key_file': '/tmp/oci_key.pem'
               }
               client = oci.core.ComputeClient(config)
               print('Client OK')
@@ -64,13 +66,11 @@ jobs:
               resp = client.launch_instance(details)
               print(f'SUCCESS: Instance created! OCID: {resp.data.id}')
               print('IMPORTANT: Disable this workflow!')
-          except oci.exceptions.InvalidConfig as e:
-              print(f'CONFIG ERROR: {e}')
           except oci.exceptions.ServiceError as e:
-              if 'Out of capacity' in str(e):
+              if 'Out of capacity' in str(e.message):
                   print('Out of host capacity, will retry.')
               else:
-                  print(f'SERVICE ERROR: status={e.status_code} code={e.code} msg={e.message}')
+                  print(f'SERVICE ERROR: status={e.status} code={e.code} msg={e.message}')
           except Exception as e:
               print(f'ERROR: {type(e).__name__}: {e}')
           print('Done.')
