@@ -2,7 +2,7 @@ name: Try to Create OCI VM
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/10 * * * *'  # Runs every 10 minutes
   workflow_dispatch:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
 
       - name: Install OCI CLI
         run: |
-          curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh | bash -s -- --accept-defaults
+          curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh | bash -s -- --accept-all-licenses
           echo "$HOME/bin" >> $GITHUB_PATH
 
       - name: Configure OCI CLI
@@ -34,7 +34,6 @@ jobs:
 
       - name: Try to Create Instance
         run: |
-          set +e
           oci compute instance launch \
             --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
             --availability-domain "${{ secrets.AD_NAME }}" \
@@ -42,18 +41,7 @@ jobs:
             --shape-config '{"ocpus":4,"memoryInGBs":24}' \
             --image-id "${{ secrets.IMAGE_ID }}" \
             --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
-            --assign-public-ip true \
+            --display-name "oci-arm-vm" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            --boot-volume-size-in-gbs 200 \
-            --display-name "oci-arm-vm"
-
-          EXIT_CODE=$?
-          echo "Exit code: $EXIT_CODE"
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "SUCCESS: Instance created!"
-          else
-            echo "Failed (likely out of capacity), will retry next schedule."
-          fi
-
+            --boot-volume-size-in-gbs 200 || true
           exit 0
