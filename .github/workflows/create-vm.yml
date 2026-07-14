@@ -12,6 +12,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install oci
       - name: Create instance using Python SDK
+        id: create
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
@@ -64,8 +65,13 @@ jobs:
               print('Launching...')
               sys.stdout.flush()
               resp = client.launch_instance(details)
-              print(f'SUCCESS: Instance created! OCID: {resp.data.id}')
+              ocid = resp.data.id
+              print(f'SUCCESS: Instance created! OCID: {ocid}')
               print('IMPORTANT: Disable this workflow!')
+              # Set GitHub output
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('status=created\n')
+                  f.write(f'ocid={ocid}\n')
           except oci.exceptions.ServiceError as e:
               if 'Out of capacity' in str(e.message):
                   print('Out of host capacity, will retry.')
@@ -77,3 +83,8 @@ jobs:
           PYEOF
           python3 -u /tmp/launch.py
           echo "Script exit: $?"
+      - name: Send email on success
+        if: steps.create.outputs.status == 'created'
+        run: |
+          echo "Instance created! Sending email..."
+          curl -s --url 'smtps://smtp.qq.com:465' --ssl-reqd             --mail-from '200981193@qq.com'             --mail-rcpt '200981193@qq.com'             --user '200981193@qq.com:${{ secrets.QQ_MAIL_PASSWORD }}'             -T <(echo -e "From: 200981193@qq.com\nTo: 200981193@qq.com\nSubject: OCI ARM Instance Created!\n\nYour OCI ARM instance has been created!\n\nInstance: oci-arm-vm\nShape: VM.Standard.A1.Flex (4 OCPU, 24 GB)\n\nIMPORTANT: Disable this workflow now!\nhttps://github.com/haha2009/oci-free-arm-instance/actions")
