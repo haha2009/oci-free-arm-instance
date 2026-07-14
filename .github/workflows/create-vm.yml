@@ -10,9 +10,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Python dependencies
-        run: |
-          pip install oci 2>&1
-          echo "EXIT: $?"
+        run: pip install oci
       - name: Create instance using Python SDK
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
@@ -26,7 +24,7 @@ jobs:
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
-          python3 -u -c "
+          cat > /tmp/launch.py << 'PYEOF'
           import oci, os, sys
           try:
               t = os.environ.get('OCI_CLI_TENANCY','')
@@ -56,8 +54,7 @@ jobs:
                   subnet_id=os.environ['OCI_SUBNET_ID'],
                   metadata={'ssh_authorized_keys': os.environ['SSH_PUBLIC_KEY']},
                   source_details=oci.core.InstanceSourceViaImageDetails(
-                      source_type='image',
-                      image_id=os.environ['IMAGE_ID']
+                      source_type='image', image_id=os.environ['IMAGE_ID']
                   ),
                   boot_volume_size_in_gbs=200
               )
@@ -75,5 +72,7 @@ jobs:
                   print(f'SERVICE ERROR: status={e.status_code} code={e.code} msg={e.message}')
           except Exception as e:
               print(f'ERROR: {type(e).__name__}: {e}')
-          print('Will retry next schedule.')
-          "
+          print('Done.')
+          PYEOF
+          python3 -u /tmp/launch.py
+          echo "Script exit: $?"
