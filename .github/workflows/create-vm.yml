@@ -26,6 +26,7 @@ jobs:
         run: |
           cat > /tmp/launch.py << 'PYEOF'
           import oci, os, sys
+          from oci.core.models import LaunchInstanceDetails, LaunchInstanceShapeConfigDetails, InstanceSourceViaImageDetails
           try:
               t = os.environ.get('OCI_CLI_TENANCY','')
               u = os.environ.get('OCI_CLI_USER','')
@@ -45,15 +46,15 @@ jobs:
               }
               client = oci.core.ComputeClient(config)
               print('Client OK')
-              details = oci.core.LaunchInstanceDetails(
+              details = LaunchInstanceDetails(
                   compartment_id=os.environ['OCI_COMPARTMENT_ID'],
                   availability_domain=os.environ['AD_NAME'],
                   display_name='oci-arm-vm',
                   shape='VM.Standard.A1.Flex',
-                  shape_config=oci.core.LaunchInstanceShapeConfigDetails(ocpus=4, memory_in_gbs=24),
+                  shape_config=LaunchInstanceShapeConfigDetails(ocpus=4, memory_in_gbs=24),
                   subnet_id=os.environ['OCI_SUBNET_ID'],
                   metadata={'ssh_authorized_keys': os.environ['SSH_PUBLIC_KEY']},
-                  source_details=oci.core.InstanceSourceViaImageDetails(
+                  source_details=InstanceSourceViaImageDetails(
                       source_type='image', image_id=os.environ['IMAGE_ID']
                   ),
                   boot_volume_size_in_gbs=200
