@@ -1,20 +1,18 @@
 name: Try to Create OCI VM
-
 on:
   schedule:
-    - cron: '*/10 * * * *'  # Runs every 10 minutes
+    - cron: '*/10 * * * *'
   workflow_dispatch:
-
 jobs:
   create-vm:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Install Python dependencies
-        run: pip install oci
-
+        run: |
+          pip install oci 2>&1
+          echo "EXIT: $?"
       - name: Create instance using Python SDK
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
@@ -28,50 +26,79 @@ jobs:
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
-          echo "$OCI_CLI_KEY_CONTENT" > /tmp/oci_api_key.pem
-          chmod 600 /tmp/oci_api_key.pem
-          
           cat > /tmp/create_instance.py << 'PYEOF'
           import oci
           import os
-          
-          config = {
-              "user": os.environ["OCI_CLI_USER"],
-              "fingerprint": os.environ["OCI_CLI_FINGERPRINT"],
-              "tenancy": os.environ["OCI_CLI_TENANCY"],
-              "region": os.environ["OCI_CLI_REGION"],
-              "key_file": "/tmp/oci_api_key.pem"
-          }
-          
-          client = oci.core.ComputeClient(config)
-          
-          launch_instance_details = oci.core.LaunchInstanceDetails(
-              compartment_id=os.environ["OCI_COMPARTMENT_ID"],
-              availability_domain=os.environ["AD_NAME"],
-              display_name="oci-arm-vm",
-              shape="VM.Standard.A1.Flex",
-              shape_config=oci.core.LaunchInstanceShapeConfigDetails(
-                  ocpus=4,
-                  memory_in_gbs=24
-              ),
-              image_id=os.environ["IMAGE_ID"],
-              subnet_id=os.environ["OCI_SUBNET_ID"],
-              metadata={
-                  "ssh_authorized_keys": os.environ["SSH_PUBLIC_KEY"]
-              },
-              source_details=oci.core.InstanceSourceViaImageDetails(
-                  source_type="image",
-                  image_id=os.environ["IMAGE_ID"]
-              ),
-              boot_volume_size_in_gbs=200
-          )
-          
+          import sys
+
           try:
+              # Print config hints for debugging (masked)
+              tenancy = os.environ.get("OCI_CLI_TENANCY", "")
+              user = os.environ.get("OCI_CLI_USER", "")
+              region = os.environ.get("OCI_CLI_REGION", "")
+              print(f"Tenancy OCID prefix: {tenancy[:20]}... (len={len(tenancy)})")
+              print(f"User OCID prefix: {user[:20]}... (len={len(user)})")
+              print(f"Region: {region}")
+              print(f"Compartment ID prefix: {os.environ.get('OCI_COMPARTMENT_ID', '')[:20]}...")
+              print(f"AD Name: {os.environ.get('AD_NAME', '')}")
+              print(f"Image ID prefix: {os.environ.get('IMAGE_ID', '')[:20]}...")
+              print(f"Subnet ID prefix: {os.environ.get('OCI_SUBNET_ID', '')[:20]}...")
+              print(f"SSH Key prefix: {os.environ.get('SSH_PUBLIC_KEY', '')[:30]}...")
+
+              config = {
+                  "user": os.environ["OCI_CLI_USER"],
+                  "fingerprint": os.environ["OCI_CLI_FINGERPRINT"],
+                  "tenancy": os.environ["OCI_CLI_TENANCY"],
+                  "region": os.environ["OCI_CLI_REGION"],
+                  "key_content": os.environ["OCI_CLI_KEY_CONTENT"]
+              }
+              print("Config created, initializing ComputeClient...")
+              client = oci.core.ComputeClient(config)
+              print("ComputeClient initialized successfully!")
+
+              launch_instance_details = oci.core.LaunchInstanceDetails(
+                  compartment_id=os.environ["OCI_COMPARTMENT_ID"],
+                  availability_domain=os.environ["AD_NAME"],
+                  display_name="oci-arm-vm",
+                  shape="VM.Standard.A1.Flex",
+                  shape_config=oci.core.LaunchInstanceShapeConfigDetails(
+                      ocpus=4,
+                      memory_in_gbs=24
+                  ),
+                  subnet_id=os.environ["OCI_SUBNET_ID"],
+                  metadata={
+                      "ssh_authorized_keys": os.environ["SSH_PUBLIC_KEY"]
+                  },
+                  source_details=oci.core.InstanceSourceViaImageDetails(
+                      source_type="image",
+                      image_id=os.environ["IMAGE_ID"],
+                      boot_volume_size_in_gbs=200
+                  )
+              )
+              print("Launching instance...")
               response = client.launch_instance(launch_instance_details)
-              print(f"Instance created! OCID: {response.data.id}")
+              print(f"SUCCESS: Instance created! OCID: {response.data.id}")
+              print("IMPORTANT: Go to Actions and DISABLE this workflow!")
+              sys.exit(0)
+          except oci.exceptions.InvalidConfig as e:
+              print(f"CONFIG ERROR: {e}")
+              print("")
+              print("Fix your GitHub Secrets:")
+              print("  - OCI_CLI_TENANCY must start with 'ocid1.tenancy.oc1..'")
+              print("  - OCI_CLI_USER must start with 'ocid1.user.oc1..'")
+              print("  - OCI_CLI_FINGERPRINT format: XX:XX:XX:XX:XX:XX:XX:XX:XX:XX:XX:XX:XX:XX:XX:XX")
+              print("  - OCI_CLI_REGION example: ap-singapore-1")
+              print("  - OCI_CLI_KEY_CONTENT must be valid PEM (-----BEGIN PRIVATE KEY-----)")
+          except oci.exceptions.ServiceError as e:
+              code = e.status_code
+              if code == 500 and "Out of capacity" in str(e):
+                  print(f"Out of host capacity (expected), will retry in 10 min.")
+              else:
+                  print(f"OCI Service Error: status={code}, code={e.code}, msg={e.message}")
           except Exception as e:
-              print(f"Error creating instance (may be out of capacity): {e}")
+              print(f"Error: {type(e).__name__}: {e}")
+          print("Will retry next schedule.")
+          sys.exit(0)
           PYEOF
-          
-          python3 /tmp/create_instance.py || true
-          exit 0
+          python3 /tmp/create_instance.py
+          echo "Script finished with exit code: $?"
