@@ -16,6 +16,17 @@ jobs:
         run: pip install oci
 
       - name: Create instance using Python SDK
+        env:
+          OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          OCI_COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID }}
+          AD_NAME: ${{ secrets.AD_NAME }}
+          IMAGE_ID: ${{ secrets.IMAGE_ID }}
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
           cat > /tmp/create_instance.py << 'PYEOF'
           import oci
@@ -59,9 +70,5 @@ jobs:
               print(f"Error creating instance (may be out of capacity): {e}")
           PYEOF
           
-          env | grep OCI > /tmp/.env
-          env | grep SSH >> /tmp/.env
-          env | grep AD >> /tmp/.env
-          env | grep IMAGE >> /tmp/.env
           python3 /tmp/create_instance.py || true
           exit 0
