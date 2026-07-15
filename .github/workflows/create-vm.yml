@@ -40,13 +40,18 @@ jobs:
               'key_file': '/tmp/oci_key.pem'
           }
           compute_client = oci.core.ComputeClient(config)
-          identity_client = oci.identity.IdentityClient(config)
 
-          # 获取所有可用性域（需要用 IdentityClient）
-          ads = identity_client.list_availability_domains(
-              compartment_id=os.environ['OCI_COMPARTMENT_ID']
-          ).data
-          ad_names = [ad.name for ad in ads]
+          # 从 AD_NAME 推导所有可用性域（如 kIof:US-PHOENIX-1-AD-1 → AD-1, AD-2, AD-3）
+          ad_base = os.environ['AD_NAME']
+          import re
+          # 提取前缀，如 kIof:US-PHOENIX-1-AD-
+          match = re.match(r'^(.+AD-)\d+$', ad_base)
+          if match:
+              prefix = match.group(1)
+              ad_names = [f'{prefix}{i}' for i in range(1, 4)]
+          else:
+              # 如果格式不匹配，就用原来的 AD
+              ad_names = [ad_base]
 
           print(f'Region: {os.environ.get("OCI_CLI_REGION","")}')
           print(f'Found {len(ad_names)} ADs: {", ".join(ad_names)}')
