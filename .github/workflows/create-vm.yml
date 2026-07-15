@@ -106,8 +106,6 @@ jobs:
           print('---')
           print('All ADs exhausted. No capacity available this time.')
           print('Will retry in 3 minutes.')
-          # 没抢到就退出码 1，让 GitHub 显示 failure（正常运维）
-          sys.exit(1)
           PYEOF
           python3 -u /tmp/launch.py
           echo "Script exit: $?"
