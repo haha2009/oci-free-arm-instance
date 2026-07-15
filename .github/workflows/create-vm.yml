@@ -1,9 +1,8 @@
 name: Try to Create OCI VM
 on:
   workflow_dispatch:
-  # 不用定时任务（不稳定），改用自触发
   schedule:
-    - cron: '*/30 * * * *'  # 每 30 分钟兜底一次
+    - cron: '*/5 * * * *'  # 每 5 分钟（GitHub 最稳定的最短间隔）
 jobs:
   create-vm:
     runs-on: ubuntu-latest
@@ -102,16 +101,6 @@ jobs:
           PYEOF
           python3 -u /tmp/launch.py
           echo "Script exit: $?"
-      - name: Self-trigger next run in 3 minutes
-        if: always() && steps.create.outputs.status != 'created'
-        run: |
-          echo "⏱ 3分钟后自动触发下一次..."
-          sleep 180
-          curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/create-vm.yml/dispatches" \
-            -d '{"ref":"main"}'
       - name: Send email on success
         if: steps.create.outputs.status == 'created'
         run: |
