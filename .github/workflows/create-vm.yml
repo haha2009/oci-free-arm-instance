@@ -106,6 +106,8 @@ jobs:
           print('---')
           print('All ADs exhausted. No capacity available this time.')
           print('Will retry in 3 minutes.')
+          # 输出黄色警告注解，在 Actions 页面显示为 ⚠️ 黄灯
+          print('::warning title=No ARM Capacity::All 3 ADs out of capacity, will retry in 3 minutes.')
           PYEOF
           python3 -u /tmp/launch.py
           echo "Script exit: $?"
