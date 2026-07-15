@@ -39,10 +39,11 @@ jobs:
               'region': os.environ['OCI_CLI_REGION'],
               'key_file': '/tmp/oci_key.pem'
           }
-          client = oci.core.ComputeClient(config)
+          compute_client = oci.core.ComputeClient(config)
+          identity_client = oci.identity.IdentityClient(config)
 
-          # 获取所有可用性域
-          ads = client.list_availability_domains(
+          # 获取所有可用性域（需要用 IdentityClient）
+          ads = identity_client.list_availability_domains(
               compartment_id=os.environ['OCI_COMPARTMENT_ID']
           ).data
           ad_names = [ad.name for ad in ads]
@@ -72,7 +73,7 @@ jobs:
                           boot_volume_size_in_gbs=200
                       )
                   )
-                  resp = client.launch_instance(details)
+                  resp = compute_client.launch_instance(details)
                   ocid = resp.data.id
                   print(f'✅ SUCCESS in {ad}! Instance OCID: {ocid}')
                   print('⚠️ IMPORTANT: Disable this workflow now!')
