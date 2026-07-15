@@ -1,6 +1,7 @@
 name: Try to Create OCI VM
 on:
   schedule:
+    # 每 10 分钟跑一次，覆盖所有时段
     - cron: '*/10 * * * *'
   workflow_dispatch:
 jobs:
@@ -28,63 +29,82 @@ jobs:
           echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > /tmp/oci_key.pem
           chmod 600 /tmp/oci_key.pem
           cat > /tmp/launch.py << 'PYEOF'
-          import oci, os, sys
+          import oci, os, sys, time
           from oci.core.models import LaunchInstanceDetails, LaunchInstanceShapeConfigDetails, InstanceSourceViaImageDetails
-          try:
-              t = os.environ.get('OCI_CLI_TENANCY','')
-              u = os.environ.get('OCI_CLI_USER','')
-              print(f'Tenancy: {t[:20]}...({len(t)})')
-              print(f'User: {u[:20]}...({len(u)})')
-              print(f'Compartment: {os.environ.get("OCI_COMPARTMENT_ID","")[:20]}...')
-              print(f'Region: {os.environ.get("OCI_CLI_REGION","")}')
-              print(f'AD: {os.environ.get("AD_NAME","")}')
-              print(f'Image: {os.environ.get("IMAGE_ID","")[:20]}...')
-              print(f'Subnet: {os.environ.get("OCI_SUBNET_ID","")[:20]}...')
-              config = {
-                  'user': os.environ['OCI_CLI_USER'],
-                  'fingerprint': os.environ['OCI_CLI_FINGERPRINT'],
-                  'tenancy': os.environ['OCI_CLI_TENANCY'],
-                  'region': os.environ['OCI_CLI_REGION'],
-                  'key_file': '/tmp/oci_key.pem'
-              }
-              client = oci.core.ComputeClient(config)
-              print('Client OK')
-              details = LaunchInstanceDetails(
-                  compartment_id=os.environ['OCI_COMPARTMENT_ID'],
-                  availability_domain=os.environ['AD_NAME'],
-                  display_name='oci-arm-vm',
-                  shape='VM.Standard.A1.Flex',
-                  shape_config=LaunchInstanceShapeConfigDetails(ocpus=4, memory_in_gbs=24),
-                  subnet_id=os.environ['OCI_SUBNET_ID'],
-                  metadata={'ssh_authorized_keys': os.environ['SSH_PUBLIC_KEY']},
-                  source_details=InstanceSourceViaImageDetails(
-                      source_type='image', image_id=os.environ['IMAGE_ID'],
-                      boot_volume_size_in_gbs=200
-                  )
-              )
-              print('Launching...')
+
+          config = {
+              'user': os.environ['OCI_CLI_USER'],
+              'fingerprint': os.environ['OCI_CLI_FINGERPRINT'],
+              'tenancy': os.environ['OCI_CLI_TENANCY'],
+              'region': os.environ['OCI_CLI_REGION'],
+              'key_file': '/tmp/oci_key.pem'
+          }
+          client = oci.core.ComputeClient(config)
+
+          # 获取所有可用性域
+          ads = client.list_availability_domains(
+              compartment_id=os.environ['OCI_COMPARTMENT_ID']
+          ).data
+          ad_names = [ad.name for ad in ads]
+
+          print(f'Region: {os.environ.get("OCI_CLI_REGION","")}')
+          print(f'Found {len(ad_names)} ADs: {", ".join(ad_names)}')
+          print(f'Shape: VM.Standard.A1.Flex (4 OCPU, 24 GB)')
+          print(f'Image: {os.environ.get("IMAGE_ID","")[:20]}...')
+          print(f'Subnet: {os.environ.get("OCI_SUBNET_ID","")[:20]}...')
+          print('---')
+
+          # 依次尝试每个 AD
+          for ad in ad_names:
+              print(f'Trying AD: {ad} ...')
               sys.stdout.flush()
-              resp = client.launch_instance(details)
-              ocid = resp.data.id
-              print(f'SUCCESS: Instance created! OCID: {ocid}')
-              print('IMPORTANT: Disable this workflow!')
-              # Set GitHub output
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write('status=created\n')
-                  f.write(f'ocid={ocid}\n')
-          except oci.exceptions.ServiceError as e:
-              if 'Out of capacity' in str(e.message):
-                  print('Out of host capacity, will retry.')
-              else:
-                  print(f'SERVICE ERROR: status={e.status} code={e.code} msg={e.message}')
-          except Exception as e:
-              print(f'ERROR: {type(e).__name__}: {e}')
-          print('Done.')
+              try:
+                  details = LaunchInstanceDetails(
+                      compartment_id=os.environ['OCI_COMPARTMENT_ID'],
+                      availability_domain=ad,
+                      display_name='oci-arm-vm',
+                      shape='VM.Standard.A1.Flex',
+                      shape_config=LaunchInstanceShapeConfigDetails(ocpus=4, memory_in_gbs=24),
+                      subnet_id=os.environ['OCI_SUBNET_ID'],
+                      metadata={'ssh_authorized_keys': os.environ['SSH_PUBLIC_KEY']},
+                      source_details=InstanceSourceViaImageDetails(
+                          source_type='image', image_id=os.environ['IMAGE_ID'],
+                          boot_volume_size_in_gbs=200
+                      )
+                  )
+                  resp = client.launch_instance(details)
+                  ocid = resp.data.id
+                  print(f'✅ SUCCESS in {ad}! Instance OCID: {ocid}')
+                  print('⚠️ IMPORTANT: Disable this workflow now!')
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write('status=created\n')
+                      f.write(f'ocid={ocid}\n')
+                      f.write(f'ad={ad}\n')
+                  sys.exit(0)  # 成功，退出
+              except oci.exceptions.ServiceError as e:
+                  msg = str(e.message)
+                  if 'Out of capacity' in msg or 'Out of host capacity' in msg:
+                      print(f'  ❌ {ad}: Out of host capacity')
+                  elif 'LimitExceeded' in msg or 'NotAuthorizedOrNotFound' in msg:
+                      print(f'  ❌ {ad}: Quota/perm error - {e.message}')
+                      # 配额类错误继续试其他 AD 也没用，跳过
+                      break
+                  else:
+                      print(f'  ❌ {ad}: ServiceError {e.status} - {e.message}')
+                  time.sleep(1)  # 避免请求太快
+
+          print('---')
+          print('All ADs exhausted. No capacity available this time.')
+          print('Will retry in 10 minutes.')
           PYEOF
           python3 -u /tmp/launch.py
           echo "Script exit: $?"
       - name: Send email on success
         if: steps.create.outputs.status == 'created'
         run: |
-          echo "Instance created! Sending email..."
-          curl -s --url 'smtps://smtp.qq.com:465' --ssl-reqd             --mail-from '200981193@qq.com'             --mail-rcpt '200981193@qq.com'             --user '200981193@qq.com:${{ secrets.QQ_MAIL_PASSWORD }}'             -T <(echo -e "From: 200981193@qq.com\nTo: 200981193@qq.com\nSubject: OCI ARM Instance Created!\n\nYour OCI ARM instance has been created!\n\nInstance: oci-arm-vm\nShape: VM.Standard.A1.Flex (4 OCPU, 24 GB)\n\nIMPORTANT: Disable this workflow now!\nhttps://github.com/haha2009/oci-free-arm-instance/actions")
+          echo "Instance created in AD ${{ steps.create.outputs.ad }}! Sending email..."
+          curl -s --url 'smtps://smtp.qq.com:465' --ssl-reqd \
+            --mail-from '200981193@qq.com' \
+            --mail-rcpt '200981193@qq.com' \
+            --user '200981193@qq.com:${{ secrets.QQ_MAIL_PASSWORD }}' \
+            -T <(echo -e "From: 200981193@qq.com\nTo: 200981193@qq.com\nSubject: OCI ARM Instance Created!\n\nYour OCI ARM instance has been created!\n\nInstance: oci-arm-vm\nShape: VM.Standard.A1.Flex (4 OCPU, 24 GB)\nAD: ${{ steps.create.outputs.ad }}\n\nIMPORTANT: Disable this workflow now!\nhttps://github.com/haha2009/oci-free-arm-instance/actions")
