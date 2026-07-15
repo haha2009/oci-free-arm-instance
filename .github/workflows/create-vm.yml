@@ -43,17 +43,8 @@ jobs:
           }
           compute_client = oci.core.ComputeClient(config)
 
-          # 从 AD_NAME 推导所有可用性域（如 kIof:US-PHOENIX-1-AD-1 → AD-1, AD-2, AD-3）
-          ad_base = os.environ['AD_NAME']
-          import re
-          # 提取前缀，如 kIof:US-PHOENIX-1-AD-
-          match = re.match(r'^(.+AD-)\d+$', ad_base)
-          if match:
-              prefix = match.group(1)
-              ad_names = [f'{prefix}{i}' for i in range(1, 4)]
-          else:
-              # 如果格式不匹配，就用原来的 AD
-              ad_names = [ad_base]
+          # 先用原来的 AD_NAME 尝试
+          ad_names = [os.environ['AD_NAME']]
 
           print(f'Region: {os.environ.get("OCI_CLI_REGION","")}')
           attempt = os.environ.get('ATTEMPT_NUM', '?')
